@@ -22,7 +22,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install openai semgrep requests
+        run: pip install semgrep requests
 
       - name: Run Semgrep scan
         # exit 0 so the workflow continues even when findings exist

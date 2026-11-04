@@ -12,13 +12,12 @@ import json
 import os
 import sys
 import requests
-import openai
 
 SARIF_PATH = "semgrep-findings.sarif"
 CONTEXT_LINES = 8
 COMMENT_MARKER = "<!-- ai-remediation-advisor -->"
 MODEL = "abliterated-model"
-BASE_URL = "https://api.abliteration.ai/v1"
+API_URL = "https://api.abliteration.ai/v1/chat/completions"
 
 
 def read_code_context(filepath: str, line: int) -> str:
@@ -36,7 +35,7 @@ def read_code_context(filepath: str, line: int) -> str:
         return f"(file not found: {filepath})"
 
 
-def analyze_finding(client: openai.OpenAI, finding: dict) -> dict:
+def analyze_finding(api_key: str, finding: dict) -> dict:
     code_context = read_code_context(finding["filepath"], finding["line"])
 
     prompt = f"""You are an AppSec engineer reviewing a Semgrep finding. Be concise and specific.
@@ -60,13 +59,28 @@ Respond with ONLY valid JSON, no markdown fences:
   "fix_explanation": "one sentence on what the fix does (null if false positive)"
 }}"""
 
-    msg = client.chat.completions.create(
-        model=MODEL,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
+    resp = requests.post(
+        API_URL,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": MODEL,
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=60,
     )
+    resp.raise_for_status()
+    data = resp.json()
 
-    text = msg.choices[0].message.content.strip()
+    content = data["choices"][0]["message"]["content"]
+    if not content:
+        print(f"    [debug] full response: {data}")
+        raise ValueError("Model returned empty content")
+
+    text = content.strip()
     if text.startswith("```"):
         text = "\n".join(text.split("\n")[1:])
     if text.endswith("```"):
@@ -231,16 +245,13 @@ def main() -> None:
 
     print(f"Analyzing {len(findings)} finding(s) with {MODEL}...")
 
-    client = openai.OpenAI(
-        api_key=os.environ["ABL_KEY"],
-        base_url=BASE_URL,
-    )
+    api_key = os.environ["ABL_KEY"]
 
     results = []
     for f in findings:
         print(f"  {f['rule_id']} @ {f['filepath']}:{f['line']}")
         try:
-            analysis = analyze_finding(client, f)
+            analysis = analyze_finding(api_key, f)
         except Exception as exc:
             print(f"    ⚠ analysis failed: {exc}")
             analysis = {
