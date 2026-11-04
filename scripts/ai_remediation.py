@@ -196,7 +196,7 @@ def analyze_finding(api_key: str, finding: dict) -> dict:
         },
         json={
             "model": MODEL,
-            "max_tokens": 1024,
+            "max_tokens": 4096,
             "messages": [{"role": "user", "content": prompt}],
         },
         timeout=60,
