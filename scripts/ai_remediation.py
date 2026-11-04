@@ -34,7 +34,7 @@ PROVIDERS = [
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "key_env": "GEMINI_KEY",
         "max_tokens": 2048,
-        "auth_header": "x-goog-api-key",  # Gemini uses key directly, no "Bearer" prefix
+        "auth_header": "Authorization",  # Bearer token, same as abliteration
     },
 ]
 
