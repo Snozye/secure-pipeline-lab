@@ -24,4 +24,11 @@ jobs:
           tar -xf gitleaks_8.24.3_linux_x64.tar.gz gitleaks
 
       - name: Run Gitleaks (scan last commit)
-        run: ./gitleaks detect --source . --config .gitleaks.toml --log-opts="-1" --exit-code 2 --redact
+        run: ./gitleaks detect --source . --config .gitleaks.toml --log-opts="-1" --exit-code 2 --redact -v --report-format=json --report-path=gitleaks-report.json
+
+      - name: Upload Gitleaks report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
