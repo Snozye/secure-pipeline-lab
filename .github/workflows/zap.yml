@@ -31,6 +31,7 @@ jobs:
           target: 'http://localhost:3000'
           fail_action: true
           allow_issue_writing: false
+          rules_file_name: 'zap.rules'
 
       - name: Upload ZAP report
         if: always()

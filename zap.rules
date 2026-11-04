@@ -1,0 +1,7 @@
+10038	IGNORE	CSP not set — TP, intentional Juice Shop missing header
+10049	IGNORE	Storable and Cacheable Content — FP, static assets are expected to be cached
+10063	IGNORE	Deprecated Feature-Policy header — TP (low), noise for portfolio pipeline
+10098	IGNORE	Cross-Domain Misconfiguration (CORS) — TP, intentional Juice Shop overpermissive CORS
+10109	IGNORE	Modern Web Application — informational only, not a vulnerability
+10110	IGNORE	Dangerous JS Functions — TP, eval() in bundle from routes/userProfile.ts (documented in findings/)
+90004	IGNORE	COEP header missing — TP, intentional Juice Shop missing security header

@@ -20,6 +20,14 @@ Gitleaks ships with regexes for known secret formats: AWS access keys, GitHub to
 
 ---
 
+## Second gap discovered — shallow clone
+
+After implementing the filesystem scan, the pipeline returned 309 leaks. Root cause: `actions/checkout@v4` defaults to `fetch-depth: 1`, which creates a **shallow clone** with only 1 commit. Gitleaks sees that 1 commit as "all files added from scratch" (a diff against the empty tree), scanning the entire 14MB codebase as one commit's diff — finding secrets everywhere in the deliberately vulnerable Juice Shop.
+
+**Fix**: `fetch-depth: 0` (full history) + `--log-opts="-1"` (scan only the latest commit's actual diff). This is the same behavior as the original action, but now with our custom rule applied.
+
+---
+
 ## The fix
 
 ### 1. Custom rule added to `.gitleaks.toml`
