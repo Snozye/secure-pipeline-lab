@@ -34,8 +34,8 @@ That documented tuning is the difference between "I ran a scanner" and knowing h
 ## Status
 
 - [x] Semgrep — 14 TPs documented, 0% FP rate after tuning
-- [ ] Trivy — dependency scan configured
-- [ ] Gitleaks — configured
+- [x] Trivy — 2 TPs (hardcoded RSA keys), 0 CVEs after `ignore-unfixed` filter, 0% FP rate
+- [x] Gitleaks — configured; scans last commit for new secrets
 - [ ] OWASP ZAP — baseline scan against running container
 - [ ] False-positive analysis documented
 
