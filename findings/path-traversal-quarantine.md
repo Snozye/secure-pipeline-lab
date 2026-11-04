@@ -28,13 +28,19 @@ if (!file.includes('/')) {
 
 ## Why it's exploitable
 
-Same forward-slash-only defense as the other file servers. The quarantine directory holds uploaded files that failed malware scanning — serving them is intentionally restricted. Path traversal out of `ftp/quarantine/` could expose files in the broader `ftp/` directory or beyond, including sensitive documents intentionally placed there for challenges (e.g., `acquisitions.md`, `www-data.bak`).
+Same forward-slash-only defense as the other file servers. The quarantine directory holds uploaded files that failed malware scanning — serving them is intentionally restricted. Path traversal out of `ftp/quarantine/` could expose files in the broader `ftp/` directory, including sensitive documents like `acquisitions.md` and `www-data.bak`.
+
+**Note on direct traversal**: URL-encoded slashes (`..%2F`) are normalized by Express before reaching the handler and are blocked in runtime testing. The exploitable surface depends on platform or middleware configuration.
+
+**Note on impact**: the files reachable via traversal from `ftp/quarantine/` (e.g., `ftp/acquisitions.md`) are already exposed by the `/ftp` directory listing finding (`server.ts:290`). The traversal adds no new exposure in the current setup but becomes relevant if the directory listing is fixed without also fixing the path traversal.
 
 ## Proof of concept
 
 ```
 GET /ftp/quarantine/..%2Facquisitions.md
 ```
+
+Blocked by Express path normalization in testing on `localhost:3000`.
 
 ## Fix
 

