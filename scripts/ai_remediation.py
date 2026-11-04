@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
 AI Remediation Advisor
-Analyzes findings from Semgrep, Gitleaks, and Trivy using abliteration.ai
-and posts a consolidated remediation comment on the PR.
+Analyzes findings from one security tool (Semgrep, Gitleaks, or Trivy)
+and posts a remediation comment on the PR.
+
+Set TOOL=semgrep|gitleaks|trivy. Defaults to running all three (local testing).
 """
 
 import json
@@ -11,13 +13,15 @@ import sys
 import requests
 
 SARIF_PATH = "semgrep-findings.sarif"
-GITLEAKS_PATH = "gitleaks-findings.json"
+GITLEAKS_PATH = "gitleaks-report.json"
 TRIVY_PATH = "trivy-findings.json"
 
 CONTEXT_LINES = 8
-COMMENT_MARKER = "<!-- ai-remediation-advisor -->"
 MODEL = "abliterated-model"
 API_URL = "https://api.abliteration.ai/v1/chat/completions"
+
+TOOL = os.environ.get("TOOL", "all")
+COMMENT_MARKER = f"<!-- ai-remediation-{TOOL} -->"
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +120,9 @@ def parse_trivy(path: str) -> list[dict]:
     findings = []
     for result in data.get("Results", []):
         target = result.get("Target", "unknown")
+        # skip scan artifacts (e.g. semgrep-findings.sarif picked up by trivy)
+        if target.endswith(".sarif") or target.endswith(".json"):
+            continue
         for secret in result.get("Secrets", []):
             findings.append({
                 "tool": "trivy",
@@ -138,7 +145,7 @@ def build_prompt(finding: dict) -> str:
 
     if tool == "semgrep":
         code_context = read_code_context(finding["filepath"], finding["line"])
-        return f"""You are an AppSec engineer reviewing a Semgrep static analysis finding. Be concise and specific.
+        return f"""You are an AppSec engineer reviewing a Semgrep finding. Be concise and specific.
 
 Finding
 - Rule: `{finding["rule_id"]}`
@@ -151,12 +158,12 @@ Code context (→ marks the flagged line):
 {code_context}
 ```
 
-Respond with ONLY valid JSON, no markdown fences:
+Respond with ONLY valid JSON (no markdown fences, no extra text):
 {{
   "is_tp": true or false,
-  "one_liner": "one sentence: why this specific code is exploitable, or why it is a false positive",
-  "fix": "unified diff with - and + lines showing the minimal change (null if false positive)",
-  "fix_explanation": "one sentence on what the fix does (null if false positive)"
+  "one_liner": "one sentence explaining why this specific code is exploitable, or why it is a false positive",
+  "fix": "REQUIRED if is_tp=true: a unified diff showing the minimal code change. Use - for removed lines and + for added lines. Example: - const x = eval(input)\\n+ const x = sanitize(input). Set to null only if is_tp=false.",
+  "fix_explanation": "REQUIRED if is_tp=true: one sentence on what the fix does. Set to null only if is_tp=false."
 }}"""
 
     else:  # gitleaks or trivy
@@ -176,18 +183,16 @@ Code context (→ marks the flagged line):
 {code_context}
 ```
 
-Respond with ONLY valid JSON, no markdown fences:
+Respond with ONLY valid JSON (no markdown fences, no extra text):
 {{
   "is_tp": true or false,
-  "one_liner": "one sentence: why this specific secret is dangerous, or why it is a false positive",
-  "fix": "unified diff showing how to remove the hardcoded secret and replace with an environment variable (null if false positive)",
-  "fix_explanation": "one sentence on what the fix does (null if false positive)"
+  "one_liner": "one sentence explaining why this secret is dangerous, or why it is a false positive",
+  "fix": "REQUIRED if is_tp=true: a unified diff showing how to remove the hardcoded secret and load it from an environment variable instead. Use - for removed lines and + for added lines. Set to null only if is_tp=false.",
+  "fix_explanation": "REQUIRED if is_tp=true: one sentence on what the fix does. Set to null only if is_tp=false."
 }}"""
 
 
 def analyze_finding(api_key: str, finding: dict) -> dict:
-    prompt = build_prompt(finding)
-
     resp = requests.post(
         API_URL,
         headers={
@@ -197,7 +202,7 @@ def analyze_finding(api_key: str, finding: dict) -> dict:
         json={
             "model": MODEL,
             "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": build_prompt(finding)}],
         },
         timeout=60,
     )
@@ -222,45 +227,41 @@ def analyze_finding(api_key: str, finding: dict) -> dict:
 # PR comment
 # ---------------------------------------------------------------------------
 
-def build_comment(results: list[dict]) -> str:
+TOOL_LABELS = {
+    "semgrep": "🔍 Semgrep (SAST)",
+    "gitleaks": "🔑 Gitleaks (Secrets)",
+    "trivy": "📦 Trivy (Secrets)",
+}
+
+SEV_EMOJI = {
+    "CRITICAL": "🔴", "ERROR": "🔴", "HIGH": "🟠",
+    "WARNING": "🟡", "MEDIUM": "🟡", "LOW": "🔵", "INFO": "⚪",
+}
+
+SEV_ORDER = {"CRITICAL": 0, "ERROR": 1, "HIGH": 2, "WARNING": 3, "MEDIUM": 4, "LOW": 5, "INFO": 6}
+
+
+def build_comment(results: list[dict], tool_name: str) -> str:
     tps = [r for r in results if r["analysis"]["is_tp"]]
     fps = [r for r in results if not r["analysis"]["is_tp"]]
+    tps.sort(key=lambda r: SEV_ORDER.get(r["finding"]["severity"], 9))
 
-    sev_order = {"CRITICAL": 0, "ERROR": 1, "HIGH": 2, "WARNING": 3, "MEDIUM": 4, "LOW": 5, "INFO": 6}
-    tps.sort(key=lambda r: (r["finding"]["tool"], sev_order.get(r["finding"]["severity"], 9)))
-
-    tool_counts = {}
-    for r in results:
-        t = r["finding"]["tool"]
-        tool_counts[t] = tool_counts.get(t, 0) + 1
-    tools_summary = " · ".join(f"{v} {k}" for k, v in sorted(tool_counts.items()))
-
+    label = TOOL_LABELS.get(tool_name, tool_name)
     lines = [
         COMMENT_MARKER,
-        "## 🤖 AI Remediation Analysis",
+        f"## {label} — AI Remediation",
         "",
-        f"Analyzed **{len(results)} finding(s)** ({tools_summary}) · "
-        f"{len(tps)} true positive(s) · {len(fps)} false positive(s)",
+        f"Analyzed **{len(results)} finding(s)** · {len(tps)} true positive(s) · {len(fps)} false positive(s)",
         "",
     ]
 
     if tps:
-        tool_labels = {
-            "semgrep": "🔍 Semgrep (SAST)",
-            "gitleaks": "🔑 Gitleaks (Secrets)",
-            "trivy": "📦 Trivy (SCA/Secrets)",
-        }
-        current_tool = None
+        lines.append("---")
+        lines.append("")
         for r in tps:
             f = r["finding"]
             a = r["analysis"]
-            if f["tool"] != current_tool:
-                current_tool = f["tool"]
-                lines += ["---", "", f"### {tool_labels.get(current_tool, current_tool)}", ""]
-            emoji = {
-                "CRITICAL": "🔴", "ERROR": "🔴", "HIGH": "🟠",
-                "WARNING": "🟡", "MEDIUM": "🟡", "LOW": "🔵", "INFO": "⚪",
-            }.get(f["severity"], "⚪")
+            emoji = SEV_EMOJI.get(f["severity"], "⚪")
             lines.append(f"**{emoji} [{f['severity']}] `{f['rule_id']}`**")
             lines.append(f"`{f['filepath']}:{f['line']}`")
             lines.append("")
@@ -341,23 +342,31 @@ def post_pr_comment(body: str) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    findings = []
-    findings += parse_semgrep(SARIF_PATH)
-    findings += parse_gitleaks(GITLEAKS_PATH)
-    findings += parse_trivy(TRIVY_PATH)
+    parsers = {
+        "semgrep": lambda: parse_semgrep(SARIF_PATH),
+        "gitleaks": lambda: parse_gitleaks(GITLEAKS_PATH),
+        "trivy": lambda: parse_trivy(TRIVY_PATH),
+    }
+
+    if TOOL == "all":
+        findings = []
+        for parse in parsers.values():
+            findings += parse()
+        tool_name = "all"
+    elif TOOL in parsers:
+        findings = parsers[TOOL]()
+        tool_name = TOOL
+    else:
+        print(f"Unknown TOOL={TOOL}. Use semgrep, gitleaks, trivy, or all.")
+        sys.exit(1)
 
     if not findings:
-        print("No findings to analyze.")
+        print(f"No findings for {TOOL}.")
         sys.exit(0)
 
-    tool_counts = {}
-    for f in findings:
-        tool_counts[f["tool"]] = tool_counts.get(f["tool"], 0) + 1
-    summary = ", ".join(f"{v} {k}" for k, v in sorted(tool_counts.items()))
-    print(f"Analyzing {len(findings)} finding(s) ({summary}) with {MODEL}...")
+    print(f"Analyzing {len(findings)} finding(s) [{TOOL}] with {MODEL}...")
 
     api_key = os.environ["ABL_KEY"]
-
     results = []
     for f in findings:
         print(f"  [{f['tool']}] {f['rule_id']} @ {f['filepath']}:{f['line']}")
@@ -373,7 +382,7 @@ def main() -> None:
             }
         results.append({"finding": f, "analysis": analysis})
 
-    comment = build_comment(results)
+    comment = build_comment(results, tool_name)
 
     if os.environ.get("PR_NUMBER"):
         post_pr_comment(comment)
