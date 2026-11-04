@@ -1,0 +1,28 @@
+name: Semgrep SAST
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  semgrep:
+    name: Semgrep scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >
+            p/owasp-top-ten
+            p/nodejs
+            p/typescript
+          generateSarif: false
+        env:
+          SEMGREP_RULES_INLINE_COMMENT: "1"
