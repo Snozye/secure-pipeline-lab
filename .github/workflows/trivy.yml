@@ -58,7 +58,7 @@ jobs:
         env:
           ABL_KEY: ${{ secrets.ABL_KEY }}
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          GROQ_KEY: ${{ secrets.GROQ_KEY }}
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
