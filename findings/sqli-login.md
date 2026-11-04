@@ -7,6 +7,7 @@
 | **Rule** | `javascript.sequelize.security.audit.sequelize-injection-from-request.sequelize-injection-from-request` |
 | **Severity** | HIGH |
 | **CWE** | CWE-89: SQL Injection |
+| **Runtime confirmed** | ✅ Yes |
 
 ## Vulnerable code
 
@@ -32,10 +33,10 @@ The password field goes through `security.hash()` (MD5) before interpolation, so
 
 ```
 POST /rest/user/login
-{"email":"' OR 1=1--","password":"anything"}
+{"email":"' OR 1=1-- -","password":"anything"}
 ```
 
-Returns the first user in the table (admin).
+Returns the first user in the table (admin). **Confirmed in runtime** — payload `' OR 1=1-- -` bypasses authentication and logs in as the admin account.
 
 ## Fix
 

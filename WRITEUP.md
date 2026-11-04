@@ -96,7 +96,8 @@ In a real project, suppression requires a linked ticket, a deadline, and a named
 
 | Vulnerability | Semgrep | Trivy | Gitleaks | ZAP |
 |---------------|---------|-------|----------|-----|
-| SQLi (search endpoint) | ✅ | — | — | ❌ (passive) |
+| SQLi (login — auth bypass) | ✅ | — | — | ❌ (passive) |
+| SQLi (search — data extraction) | ✅ | — | — | ❌ (passive) |
 | RCE via eval() | ✅ | — | — | ✅ (compiled bundle) |
 | Hardcoded JWT key | ✅ | ✅ | — | — |
 | Hardcoded IaC key | ❌ | ✅ | — | — |

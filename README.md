@@ -75,9 +75,9 @@ The 5 TPs — missing CSP, overpermissive CORS, missing COEP, deprecated Feature
 
 | Finding | File | Severity | Confirmed in runtime |
 |---------|------|----------|----------------------|
-| [SQL Injection — Login](findings/sqli-login.md) | `routes/login.ts:34` | HIGH | — |
+| [SQL Injection — Login](findings/sqli-login.md) | `routes/login.ts:34` | HIGH | ✅ |
 | [SQL Injection — Search](findings/sqli-search.md) | `routes/search.ts:23` | HIGH | ✅ |
-| [RCE via eval()](findings/rce-eval-userprofile.md) | `routes/userProfile.ts:65` | CRITICAL | — |
+| [RCE via eval()](findings/rce-eval-userprofile.md) | `routes/userProfile.ts:65` | CRITICAL | ✅ |
 | [Hardcoded JWT key](findings/hardcoded-jwt-key.md) | `lib/insecurity.ts:21` | HIGH | — |
 | [Path traversal — file server](findings/path-traversal-fileserver.md) | `routes/fileServer.ts:32` | HIGH | partial |
 | [Path traversal — key server](findings/path-traversal-keyserver.md) | `routes/keyServer.ts:14` | HIGH | ❌ |

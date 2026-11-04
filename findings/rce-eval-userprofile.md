@@ -7,6 +7,7 @@
 | **Rule** | `javascript.lang.security.audit.eval-detected.eval-detected` |
 | **Severity** | HIGH |
 | **CWE** | CWE-94: Code Injection / RCE |
+| **Runtime confirmed** | ✅ Yes |
 
 ## Vulnerable code
 
@@ -43,6 +44,8 @@ The source is the database, so this requires the attacker to have already set a 
 1. Set username via `PUT /rest/users/me`: `{"username": "#{require('child_process').execSync('id').toString()}"}`
 2. Load `GET /profile`
 3. Server executes the command; return value rendered in profile page
+
+**Confirmed in runtime** — attack chain executed end-to-end.
 
 ## Fix
 
