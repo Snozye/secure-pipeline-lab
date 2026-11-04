@@ -261,13 +261,14 @@ def analyze_finding(finding: dict) -> tuple[dict, str]:
             return result, provider["name"]
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else None
+            body = exc.response.text[:500] if exc.response is not None else ""
             if status == 429:
                 print(f"    [{provider['name']}] HTTP 429 (rate limited) — waiting 60s before next provider")
                 time.sleep(60)
             else:
-                print(f"    [{provider['name']}] HTTP {status} — trying next provider")
+                print(f"    [{provider['name']}] HTTP {status} — {body} — trying next provider")
             last_exc = exc
-            if status not in (402, 429, 500, 502, 503):
+            if status not in (400, 402, 429, 500, 502, 503):
                 break  # non-retriable error, don't bother with fallback
         except (ValueError, json.JSONDecodeError) as exc:
             print(f"    [{provider['name']}] {exc} — trying next provider")
