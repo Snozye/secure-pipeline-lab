@@ -33,7 +33,7 @@ That documented tuning is the difference between "I ran a scanner" and knowing h
 
 ## Status
 
-- [ ] Semgrep — baseline scan complete, tuning in progress
+- [x] Semgrep — 14 TPs documented, 0% FP rate after tuning
 - [ ] Trivy — dependency scan configured
 - [ ] Gitleaks — configured
 - [ ] OWASP ZAP — baseline scan against running container
