@@ -34,7 +34,15 @@ PROVIDERS = [
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "key_env": "GEMINI_KEY",
         "max_tokens": 2048,
-        "auth_header": "Authorization",  # Bearer token, same as abliteration
+        "auth_header": "Authorization",
+    },
+    {
+        "name": "groq",
+        "model": "llama-3.3-70b-versatile",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "key_env": "GROQ_KEY",
+        "max_tokens": 2048,
+        "auth_header": "Authorization",
     },
 ]
 
