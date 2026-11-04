@@ -1,8 +1,6 @@
 name: OWASP ZAP DAST
 
 on:
-  push:
-    branches: ["**"]
   pull_request:
     branches: ["**"]
 
