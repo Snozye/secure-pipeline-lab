@@ -16,13 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Semgrep
+        run: pip install semgrep
+
       - name: Run Semgrep
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: >
-            p/owasp-top-ten
-            p/nodejs
-            p/typescript
-          generateSarif: false
-        env:
-          SEMGREP_RULES_INLINE_COMMENT: "1"
+        run: |
+          semgrep scan \
+            --config p/owasp-top-ten \
+            --config p/nodejs \
+            --config p/typescript \
+            --error \
+            --no-rewrite-rule-ids \
+            .
