@@ -93,3 +93,4 @@ The 5 TPs — missing CSP, overpermissive CORS, missing COEP, deprecated Feature
 ## Upstream
 
 OWASP Juice Shop is maintained at [juice-shop/juice-shop](https://github.com/juice-shop/juice-shop). License: [MIT](LICENSE)
+
