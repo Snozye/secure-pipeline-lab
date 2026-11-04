@@ -210,6 +210,10 @@ Respond with ONLY valid JSON (no markdown fences, no extra text):
 }}"""
 
 
+RETRY_DELAYS = {429: 60, 503: 30}  # seconds to wait before retrying same provider
+MAX_RETRIES = 2
+
+
 def _call_provider(provider: dict, finding: dict) -> dict:
     key_env = provider["key_env"]
     api_key = os.environ.get(key_env, "")
@@ -217,27 +221,28 @@ def _call_provider(provider: dict, finding: dict) -> dict:
         raise ValueError(f"No API key for provider {provider['name']} (env: {key_env})")
 
     auth_header = provider.get("auth_header", "Authorization")
-    if auth_header == "Authorization":
-        auth_value = f"Bearer {api_key}"
-    else:
-        auth_value = api_key
+    auth_value = f"Bearer {api_key}" if auth_header == "Authorization" else api_key
 
-    resp = requests.post(
-        provider["url"],
-        headers={
-            auth_header: auth_value,
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": provider["model"],
-            "max_tokens": provider["max_tokens"],
-            "messages": [{"role": "user", "content": build_prompt(finding)}],
-        },
-        timeout=60,
-    )
-    resp.raise_for_status()
+    for attempt in range(1, MAX_RETRIES + 1):
+        resp = requests.post(
+            provider["url"],
+            headers={auth_header: auth_value, "Content-Type": "application/json"},
+            json={
+                "model": provider["model"],
+                "max_tokens": provider["max_tokens"],
+                "messages": [{"role": "user", "content": build_prompt(finding)}],
+            },
+            timeout=60,
+        )
+        if resp.status_code in RETRY_DELAYS and attempt < MAX_RETRIES:
+            delay = RETRY_DELAYS[resp.status_code]
+            print(f"    [{provider['name']}] HTTP {resp.status_code} — retrying in {delay}s (attempt {attempt}/{MAX_RETRIES})")
+            time.sleep(delay)
+            continue
+        resp.raise_for_status()
+        break
+
     data = resp.json()
-
     content = data["choices"][0]["message"]["content"]
     if not content:
         print(f"    [debug] full response from {provider['name']}: {data}")
@@ -261,15 +266,11 @@ def analyze_finding(finding: dict) -> tuple[dict, str]:
             return result, provider["name"]
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else None
-            body = exc.response.text[:500] if exc.response is not None else ""
-            if status == 429:
-                print(f"    [{provider['name']}] HTTP 429 (rate limited) — waiting 60s before next provider")
-                time.sleep(60)
-            else:
-                print(f"    [{provider['name']}] HTTP {status} — {body} — trying next provider")
+            body = exc.response.text[:300] if exc.response is not None else ""
+            print(f"    [{provider['name']}] HTTP {status} — {body} — trying next provider")
             last_exc = exc
             if status not in (400, 402, 429, 500, 502, 503):
-                break  # non-retriable error, don't bother with fallback
+                break  # non-retriable status, skip remaining providers
         except (ValueError, json.JSONDecodeError) as exc:
             print(f"    [{provider['name']}] {exc} — trying next provider")
             last_exc = exc
