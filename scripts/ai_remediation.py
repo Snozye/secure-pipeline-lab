@@ -30,7 +30,7 @@ PROVIDERS = [
     },
     {
         "name": "gemini",
-        "model": "gemini-2.0-flash",
+        "model": "gemini-3.8-flash",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "key_env": "GEMINI_KEY",
         "max_tokens": 2048,
