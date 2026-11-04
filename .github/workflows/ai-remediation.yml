@@ -22,7 +22,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install anthropic semgrep requests
+        run: pip install openai semgrep requests
 
       - name: Run Semgrep scan
         # exit 0 so the workflow continues even when findings exist
@@ -30,7 +30,7 @@ jobs:
 
       - name: Run AI remediation analysis
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ABL_KEY: ${{ secrets.ABL_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
