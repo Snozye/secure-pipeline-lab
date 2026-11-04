@@ -25,7 +25,6 @@ jobs:
           scanners: vuln
           severity: CRITICAL,HIGH
           exit-code: 1
-          ignore-unfixed: true
 
       - name: Run Trivy (secrets scan)
         if: always() && github.event_name == 'pull_request'
@@ -84,4 +83,3 @@ jobs:
           image-ref: juice-shop:ci
           severity: CRITICAL,HIGH
           exit-code: 1
-          ignore-unfixed: true
