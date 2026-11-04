@@ -38,7 +38,7 @@ PROVIDERS = [
     },
     {
         "name": "groq",
-        "model": "llama3-70b-8192",
+        "model": "llama-3.1-8b-instant",
         "url": "https://api.groq.com/openai/v1/chat/completions",
         "key_env": "GROQ_KEY",
         "max_tokens": 2048,
