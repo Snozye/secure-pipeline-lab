@@ -26,6 +26,7 @@ PROVIDERS = [
         "url": "https://api.abliteration.ai/v1/chat/completions",
         "key_env": "ABL_KEY",
         "max_tokens": 4096,
+        "auth_header": "Authorization",  # value will be "Bearer {key}"
     },
     {
         "name": "gemini",
@@ -33,6 +34,7 @@ PROVIDERS = [
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "key_env": "GEMINI_KEY",
         "max_tokens": 2048,
+        "auth_header": "x-goog-api-key",  # Gemini uses key directly, no "Bearer" prefix
     },
 ]
 
@@ -214,10 +216,16 @@ def _call_provider(provider: dict, finding: dict) -> dict:
     if not api_key:
         raise ValueError(f"No API key for provider {provider['name']} (env: {key_env})")
 
+    auth_header = provider.get("auth_header", "Authorization")
+    if auth_header == "Authorization":
+        auth_value = f"Bearer {api_key}"
+    else:
+        auth_value = api_key
+
     resp = requests.post(
         provider["url"],
         headers={
-            "Authorization": f"Bearer {api_key}",
+            auth_header: auth_value,
             "Content-Type": "application/json",
         },
         json={
