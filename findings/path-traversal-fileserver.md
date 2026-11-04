@@ -34,15 +34,23 @@ function verify(file, res, next) {
 
 The forward-slash check (`!file.includes('/')`) blocks simple traversal sequences like `../etc/passwd` but only checks for `/`. On Windows, `\` is also a path separator, and URL-encoded variants (`%2F`, `%5C`) may pass this check depending on the Express version and middleware.
 
-The null byte defense (`cutOffPoisonNullByte`) handles `%00` injection but does not cover all traversal vectors.
+The null byte defense (`cutOffPoisonNullByte`) is itself a vulnerability: it enables bypassing the allowlist extension check. The logic runs in this order:
+
+1. `endsWithAllowlistedFileType('acquisitions.md%2500.pdf')` → passes (ends in `.pdf`)
+2. `cutOffPoisonNullByte(...)` → strips everything from `%00` onward → `acquisitions.md`
+3. `res.sendFile(path.resolve('ftp/', 'acquisitions.md'))` → serves the file without a permitted extension
+
+**Note on impact**: the primary impact of this route is already covered by the directory listing finding (`server.ts:290`) — `/ftp` is fully browsable without authentication. The null byte vector extends the surface to files that lack an allowlisted extension, which would otherwise be blocked.
 
 ## Proof of concept
 
 ```
-GET /ftp/%2F..%2F..%2Fetc%2Fpasswd
+GET /ftp/acquisitions.md%2500.pdf
 ```
 
-Or on Node.js, using backslash on certain platforms.
+The server serves `acquisitions.md` despite the request appearing to end in `.pdf`.
+
+Tested on `localhost:3000`: direct traversal (`..%2F`) is blocked by Express path normalization before reaching the handler. The null byte is the confirmed exploitable vector.
 
 ## Fix
 
