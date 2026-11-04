@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """
 AI Remediation Advisor
-Reads Semgrep SARIF findings, calls Claude for each finding,
+Analyzes findings from Semgrep, Gitleaks, and Trivy using abliteration.ai
 and posts a consolidated remediation comment on the PR.
-
-Usage in CI: set ANTHROPIC_API_KEY, GITHUB_TOKEN, PR_NUMBER, REPO.
-Usage locally: set only ANTHROPIC_API_KEY — prints comment to stdout.
 """
 
 import json
@@ -14,11 +11,18 @@ import sys
 import requests
 
 SARIF_PATH = "semgrep-findings.sarif"
+GITLEAKS_PATH = "gitleaks-findings.json"
+TRIVY_PATH = "trivy-findings.json"
+
 CONTEXT_LINES = 8
 COMMENT_MARKER = "<!-- ai-remediation-advisor -->"
 MODEL = "abliterated-model"
 API_URL = "https://api.abliteration.ai/v1/chat/completions"
 
+
+# ---------------------------------------------------------------------------
+# Code context
+# ---------------------------------------------------------------------------
 
 def read_code_context(filepath: str, line: int) -> str:
     try:
@@ -35,10 +39,106 @@ def read_code_context(filepath: str, line: int) -> str:
         return f"(file not found: {filepath})"
 
 
-def analyze_finding(api_key: str, finding: dict) -> dict:
-    code_context = read_code_context(finding["filepath"], finding["line"])
+# ---------------------------------------------------------------------------
+# Parsers
+# ---------------------------------------------------------------------------
 
-    prompt = f"""You are an AppSec engineer reviewing a Semgrep finding. Be concise and specific.
+def parse_semgrep(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        sarif = json.load(f)
+
+    seen, findings = set(), []
+    for run in sarif.get("runs", []):
+        rules = {r["id"]: r for r in run.get("tool", {}).get("driver", {}).get("rules", [])}
+        for result in run.get("results", []):
+            rule_id = result.get("ruleId", "unknown")
+            rule = rules.get(rule_id, {})
+            rule_name = rule.get("shortDescription", {}).get("text", "") or rule_id
+            severity = result.get("level", "warning").upper()
+            for loc in result.get("locations", []):
+                try:
+                    uri = loc["physicalLocation"]["artifactLocation"]["uri"]
+                    line = loc["physicalLocation"]["region"]["startLine"]
+                except KeyError:
+                    continue
+                key = (rule_id, uri, line)
+                if key in seen:
+                    continue
+                seen.add(key)
+                findings.append({
+                    "tool": "semgrep",
+                    "rule_id": rule_id,
+                    "rule_name": rule_name,
+                    "filepath": uri,
+                    "line": line,
+                    "severity": severity,
+                    "extra": None,
+                })
+    return findings
+
+
+def parse_gitleaks(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            return []
+    if not data:
+        return []
+
+    findings = []
+    for item in data:
+        findings.append({
+            "tool": "gitleaks",
+            "rule_id": item.get("RuleID", "unknown"),
+            "rule_name": item.get("Description", item.get("RuleID", "unknown")),
+            "filepath": item.get("File", "unknown"),
+            "line": item.get("StartLine", 1),
+            "severity": "HIGH",
+            "extra": item.get("Match", ""),
+        })
+    return findings
+
+
+def parse_trivy(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            return []
+
+    findings = []
+    for result in data.get("Results", []):
+        target = result.get("Target", "unknown")
+        for secret in result.get("Secrets", []):
+            findings.append({
+                "tool": "trivy",
+                "rule_id": secret.get("RuleID", "unknown"),
+                "rule_name": secret.get("Title", secret.get("Category", "unknown")),
+                "filepath": target,
+                "line": secret.get("StartLine", 1),
+                "severity": secret.get("Severity", "HIGH").upper(),
+                "extra": secret.get("Match", ""),
+            })
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# AI analysis
+# ---------------------------------------------------------------------------
+
+def build_prompt(finding: dict) -> str:
+    tool = finding["tool"]
+
+    if tool == "semgrep":
+        code_context = read_code_context(finding["filepath"], finding["line"])
+        return f"""You are an AppSec engineer reviewing a Semgrep static analysis finding. Be concise and specific.
 
 Finding
 - Rule: `{finding["rule_id"]}`
@@ -55,9 +155,38 @@ Respond with ONLY valid JSON, no markdown fences:
 {{
   "is_tp": true or false,
   "one_liner": "one sentence: why this specific code is exploitable, or why it is a false positive",
-  "fix": "unified diff with - and + lines showing the minimal change (null if false positive or no code change needed)",
+  "fix": "unified diff with - and + lines showing the minimal change (null if false positive)",
   "fix_explanation": "one sentence on what the fix does (null if false positive)"
 }}"""
+
+    else:  # gitleaks or trivy
+        code_context = read_code_context(finding["filepath"], finding["line"])
+        match_info = f"\nMatched pattern: `{finding['extra']}`" if finding.get("extra") else ""
+        return f"""You are an AppSec engineer reviewing a secret detected in source code. Be concise and specific.
+
+Finding
+- Tool: {tool.capitalize()}
+- Rule: `{finding["rule_id"]}`
+- Description: {finding["rule_name"]}
+- File: `{finding["filepath"]}:{finding["line"]}`
+- Severity: {finding["severity"]}{match_info}
+
+Code context (→ marks the flagged line):
+```
+{code_context}
+```
+
+Respond with ONLY valid JSON, no markdown fences:
+{{
+  "is_tp": true or false,
+  "one_liner": "one sentence: why this specific secret is dangerous, or why it is a false positive",
+  "fix": "unified diff showing how to remove the hardcoded secret and replace with an environment variable (null if false positive)",
+  "fix_explanation": "one sentence on what the fix does (null if false positive)"
+}}"""
+
+
+def analyze_finding(api_key: str, finding: dict) -> dict:
+    prompt = build_prompt(finding)
 
     resp = requests.post(
         API_URL,
@@ -89,82 +218,53 @@ Respond with ONLY valid JSON, no markdown fences:
     return json.loads(text.strip())
 
 
-def parse_sarif(path: str) -> list[dict]:
-    with open(path) as f:
-        sarif = json.load(f)
-
-    seen = set()
-    findings = []
-
-    for run in sarif.get("runs", []):
-        rules = {
-            r["id"]: r
-            for r in run.get("tool", {}).get("driver", {}).get("rules", [])
-        }
-        for result in run.get("results", []):
-            rule_id = result.get("ruleId", "unknown")
-            rule = rules.get(rule_id, {})
-            rule_name = (
-                rule.get("shortDescription", {}).get("text", "")
-                or rule.get("name", rule_id)
-            )
-            severity = result.get("level", "warning").upper()
-
-            for loc in result.get("locations", []):
-                try:
-                    uri = loc["physicalLocation"]["artifactLocation"]["uri"]
-                    line = loc["physicalLocation"]["region"]["startLine"]
-                except KeyError:
-                    continue
-
-                key = (rule_id, uri, line)
-                if key in seen:
-                    continue
-                seen.add(key)
-
-                findings.append(
-                    {
-                        "rule_id": rule_id,
-                        "rule_name": rule_name,
-                        "filepath": uri,
-                        "line": line,
-                        "severity": severity,
-                    }
-                )
-
-    return findings
-
+# ---------------------------------------------------------------------------
+# PR comment
+# ---------------------------------------------------------------------------
 
 def build_comment(results: list[dict]) -> str:
     tps = [r for r in results if r["analysis"]["is_tp"]]
     fps = [r for r in results if not r["analysis"]["is_tp"]]
 
-    sev_order = {"ERROR": 0, "WARNING": 1, "INFO": 2}
-    tps.sort(key=lambda r: sev_order.get(r["finding"]["severity"], 9))
+    sev_order = {"CRITICAL": 0, "ERROR": 1, "HIGH": 2, "WARNING": 3, "MEDIUM": 4, "LOW": 5, "INFO": 6}
+    tps.sort(key=lambda r: (r["finding"]["tool"], sev_order.get(r["finding"]["severity"], 9)))
+
+    tool_counts = {}
+    for r in results:
+        t = r["finding"]["tool"]
+        tool_counts[t] = tool_counts.get(t, 0) + 1
+    tools_summary = " · ".join(f"{v} {k}" for k, v in sorted(tool_counts.items()))
 
     lines = [
         COMMENT_MARKER,
         "## 🤖 AI Remediation Analysis",
         "",
-        f"Analyzed **{len(results)} finding(s)** · "
+        f"Analyzed **{len(results)} finding(s)** ({tools_summary}) · "
         f"{len(tps)} true positive(s) · {len(fps)} false positive(s)",
         "",
     ]
 
     if tps:
-        lines += ["---", ""]
+        tool_labels = {
+            "semgrep": "🔍 Semgrep (SAST)",
+            "gitleaks": "🔑 Gitleaks (Secrets)",
+            "trivy": "📦 Trivy (SCA/Secrets)",
+        }
+        current_tool = None
         for r in tps:
             f = r["finding"]
             a = r["analysis"]
-            emoji = {"ERROR": "🔴", "WARNING": "🟡", "INFO": "🔵"}.get(
-                f["severity"], "⚪"
-            )
-            lines.append(
-                f"### {emoji} [{f['severity']}] `{f['rule_id']}`"
-            )
+            if f["tool"] != current_tool:
+                current_tool = f["tool"]
+                lines += ["---", "", f"### {tool_labels.get(current_tool, current_tool)}", ""]
+            emoji = {
+                "CRITICAL": "🔴", "ERROR": "🔴", "HIGH": "🟠",
+                "WARNING": "🟡", "MEDIUM": "🟡", "LOW": "🔵", "INFO": "⚪",
+            }.get(f["severity"], "⚪")
+            lines.append(f"**{emoji} [{f['severity']}] `{f['rule_id']}`**")
             lines.append(f"`{f['filepath']}:{f['line']}`")
             lines.append("")
-            lines.append(f"{a['one_liner']}")
+            lines.append(a["one_liner"])
             lines.append("")
             if a.get("fix"):
                 lines.append("<details>")
@@ -193,9 +293,12 @@ def build_comment(results: list[dict]) -> str:
         f"*Generated by [{MODEL}](https://abliteration.ai) · "
         "[secure-pipeline-lab](https://github.com/Snozye/secure-pipeline-lab)*",
     ]
-
     return "\n".join(lines)
 
+
+# ---------------------------------------------------------------------------
+# GitHub
+# ---------------------------------------------------------------------------
 
 def delete_previous_comments(token: str, repo: str, pr_number: str) -> None:
     url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
@@ -233,27 +336,35 @@ def post_pr_comment(body: str) -> None:
     print(f"Posted comment: {resp.json()['html_url']}")
 
 
-def main() -> None:
-    if not os.path.exists(SARIF_PATH):
-        print("No SARIF file found — skipping AI analysis.")
-        sys.exit(0)
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
-    findings = parse_sarif(SARIF_PATH)
+def main() -> None:
+    findings = []
+    findings += parse_semgrep(SARIF_PATH)
+    findings += parse_gitleaks(GITLEAKS_PATH)
+    findings += parse_trivy(TRIVY_PATH)
+
     if not findings:
         print("No findings to analyze.")
         sys.exit(0)
 
-    print(f"Analyzing {len(findings)} finding(s) with {MODEL}...")
+    tool_counts = {}
+    for f in findings:
+        tool_counts[f["tool"]] = tool_counts.get(f["tool"], 0) + 1
+    summary = ", ".join(f"{v} {k}" for k, v in sorted(tool_counts.items()))
+    print(f"Analyzing {len(findings)} finding(s) ({summary}) with {MODEL}...")
 
     api_key = os.environ["ABL_KEY"]
 
     results = []
     for f in findings:
-        print(f"  {f['rule_id']} @ {f['filepath']}:{f['line']}")
+        print(f"  [{f['tool']}] {f['rule_id']} @ {f['filepath']}:{f['line']}")
         try:
             analysis = analyze_finding(api_key, f)
         except Exception as exc:
-            print(f"    ⚠ analysis failed: {exc}")
+            print(f"    ⚠ failed: {exc}")
             analysis = {
                 "is_tp": True,
                 "one_liner": "Analysis failed — review manually.",
