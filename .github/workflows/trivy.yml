@@ -1,0 +1,94 @@
+name: Trivy SCA + Container
+
+on:
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  trivy-sca:
+    name: Dependency scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --omit=dev --ignore-scripts
+
+      - name: Run Trivy (filesystem / SCA)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          exit-code: 1
+
+      - name: Run Trivy (secrets scan)
+        if: always() && github.event_name == 'pull_request'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: json
+          output: trivy-findings.json
+          exit-code: "0"
+
+      - name: Set up Python
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        if: always() && github.event_name == 'pull_request'
+        run: pip install requests
+
+      - name: Run AI remediation analysis
+        if: always() && github.event_name == 'pull_request'
+        env:
+          ABL_KEY: ${{ secrets.ABL_KEY }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          TOOL: trivy
+        run: python scripts/ai_remediation.py
+
+      - name: Upload Trivy findings
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-findings
+          path: trivy-findings.json
+
+  trivy-container:
+    name: Container image scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t juice-shop:ci .
+
+      - name: Run Trivy (container image)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: juice-shop:ci
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          exit-code: 1

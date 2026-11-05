@@ -1,0 +1,16 @@
+# upstream CI — not application code
+.github/
+
+# intentionally vulnerable challenge files
+data/static/codefixes/
+
+# upstream infrastructure (intentionally insecure by design)
+terraform/
+infrastructure/
+
+# npm config from upstream
+.npmrc
+frontend/.npmrc
+
+# test files — intentional wrong keys and smoke test infra
+test/

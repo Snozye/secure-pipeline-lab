@@ -1,0 +1,62 @@
+name: Semgrep SAST
+
+on:
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  semgrep:
+    name: Semgrep scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Semgrep
+        run: pip install semgrep requests
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config p/owasp-top-ten \
+            --config p/nodejs \
+            --config p/typescript \
+            --error \
+            --no-rewrite-rule-ids \
+            --sarif \
+            --output semgrep-findings.sarif \
+            . || true
+
+      - name: Fail on findings
+        run: |
+          python - <<'EOF'
+          import json, sys
+          with open("semgrep-findings.sarif") as f:
+              sarif = json.load(f)
+          count = sum(len(r.get("results", [])) for r in sarif.get("runs", []))
+          if count > 0:
+              print(f"Semgrep found {count} finding(s). Failing build.")
+              sys.exit(1)
+          EOF
+
+      - name: Run AI remediation analysis
+        if: always() && github.event_name == 'pull_request'
+        env:
+          ABL_KEY: ${{ secrets.ABL_KEY }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          TOOL: semgrep
+        run: python scripts/ai_remediation.py
+
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-sarif
+          path: semgrep-findings.sarif

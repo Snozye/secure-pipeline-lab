@@ -1,0 +1,11 @@
+title = "Gitleaks — secure-pipeline-lab"
+
+[extend]
+useDefault = true
+
+# Custom rule: catch generic hardcoded passwords by variable name
+[[rules]]
+id = "generic-password-variable"
+description = "Hardcoded password in variable assignment"
+regex = '''(?i)(?:password|passwd|secret|pwd)\s*(?:=|:)\s*['"][^'"]{8,}['"]'''
+tags = ["generic", "password"]

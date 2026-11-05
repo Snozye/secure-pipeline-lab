@@ -1,0 +1,55 @@
+name: Gitleaks Secrets
+
+on:
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  gitleaks:
+    name: Secrets scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Gitleaks
+        run: |
+          wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          tar -xf gitleaks_8.24.3_linux_x64.tar.gz gitleaks
+
+      - name: Run Gitleaks (scan last commit)
+        run: ./gitleaks detect --source . --config .gitleaks.toml --log-opts="-1" --exit-code 2 --redact -v --report-format=json --report-path=gitleaks-report.json
+
+      - name: Set up Python
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        if: always() && github.event_name == 'pull_request'
+        run: pip install requests
+
+      - name: Run AI remediation analysis
+        if: always() && github.event_name == 'pull_request'
+        env:
+          ABL_KEY: ${{ secrets.ABL_KEY }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          TOOL: gitleaks
+        run: python scripts/ai_remediation.py
+
+      - name: Upload Gitleaks report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json

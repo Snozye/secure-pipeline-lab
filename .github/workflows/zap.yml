@@ -1,0 +1,39 @@
+name: OWASP ZAP DAST
+
+on:
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  zap-baseline:
+    name: Baseline scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Juice Shop image
+        run: docker build -t juice-shop:ci .
+
+      - name: Start Juice Shop
+        run: |
+          docker run -d --name juice-shop -p 3000:3000 juice-shop:ci
+          timeout 120 bash -c 'until curl -sf http://localhost:3000 > /dev/null; do sleep 3; done'
+          echo "Juice Shop ready"
+
+      - name: Run ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: 'http://localhost:3000'
+          fail_action: true
+          allow_issue_writing: false
+          rules_file_name: 'zap.rules'
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report_html.html
