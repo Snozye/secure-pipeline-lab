@@ -38,7 +38,7 @@ PROVIDERS = [
     },
     {
         "name": "openrouter",
-        "model": "meta-llama/llama-3.1-8b-instruct:free",
+        "model": "recursive/flint",
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "key_env": "OPENROUTER_KEY",
         "max_tokens": 2048,
