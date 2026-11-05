@@ -42,7 +42,7 @@ jobs:
               sys.exit(1)
           EOF
 
-      - name: Run AI remediation analysis
+      - name: Post findings comment
         if: always() && github.event_name == 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

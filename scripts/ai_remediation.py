@@ -14,6 +14,7 @@ import requests
 SARIF_PATH = "semgrep-findings.sarif"
 GITLEAKS_PATH = "gitleaks-report.json"
 TRIVY_PATH = "trivy-findings.json"
+ZAP_PATH = "report_json.json"
 
 TOOL = os.environ.get("TOOL", "all")
 COMMENT_MARKER = f"<!-- security-findings-{TOOL} -->"
@@ -88,6 +89,36 @@ def parse_gitleaks(path: str) -> list[dict]:
     return findings
 
 
+def parse_zap(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            return []
+
+    findings = []
+    for alert in data.get("site", [{}])[0].get("alerts", []):
+        risk = alert.get("riskdesc", "").split(" ")[0].upper()
+        findings.append({
+            "tool": "zap",
+            "rule_id": alert.get("pluginid", "unknown"),
+            "rule_name": alert.get("alert", "unknown"),
+            "severity": risk if risk in SEV_ORDER else "MEDIUM",
+            "confidence": alert.get("confidence", ""),
+            "description": alert.get("desc", "").replace("<p>", "").replace("</p>", " ").strip()[:300],
+            "solution": alert.get("solution", "").replace("<p>", "").replace("</p>", " ").strip()[:300],
+            "reference": alert.get("reference", ""),
+            "instances": [
+                {"uri": i.get("uri", ""), "method": i.get("method", ""), "evidence": i.get("evidence", "")[:100]}
+                for i in alert.get("instances", [])[:5]
+            ],
+            "count": alert.get("count", len(alert.get("instances", []))),
+        })
+    return findings
+
+
 def parse_trivy(path: str) -> list[dict]:
     if not os.path.exists(path):
         return []
@@ -145,6 +176,7 @@ TOOL_LABELS = {
     "semgrep": "🔍 Semgrep SAST",
     "gitleaks": "🔑 Gitleaks Secrets",
     "trivy": "📦 Trivy SCA / Secrets",
+    "zap": "🌐 OWASP ZAP DAST",
 }
 
 
@@ -252,6 +284,46 @@ def build_trivy_comment(findings: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def build_zap_comment(findings: list[dict]) -> str:
+    findings = sorted(findings, key=lambda f: SEV_ORDER.get(f["severity"], 9))
+    lines = [
+        COMMENT_MARKER,
+        f"## {TOOL_LABELS['zap']} — {len(findings)} alert(s)",
+        "",
+        "| Severity | Alert | Instances |",
+        "|----------|-------|-----------|",
+    ]
+    for f in findings:
+        emoji = SEV_EMOJI.get(f["severity"], "⚪")
+        lines.append(f"| {emoji} {f['severity']} | {f['rule_name']} | {f['count']} |")
+
+    lines += ["", "---", ""]
+    for f in findings:
+        emoji = SEV_EMOJI.get(f["severity"], "⚪")
+        lines.append(f"### {emoji} {f['rule_name']}")
+        lines.append(f"**Plugin ID:** `{f['rule_id']}` · **Confidence:** {f['confidence']} · **Instances:** {f['count']}")
+        lines.append("")
+        if f.get("description"):
+            lines.append(f"**Description:** {f['description']}")
+            lines.append("")
+        if f.get("solution"):
+            lines.append(f"**Solution:** {f['solution']}")
+            lines.append("")
+        if f.get("instances"):
+            lines.append("<details>")
+            lines.append("<summary>Affected URLs</summary>")
+            lines.append("")
+            for inst in f["instances"]:
+                evidence = f" — `{inst['evidence']}`" if inst.get("evidence") else ""
+                lines.append(f"- `{inst['method']} {inst['uri']}`{evidence}")
+            lines.append("")
+            lines.append("</details>")
+            lines.append("")
+
+    lines += ["---", "*Check the Actions log for the full HTML report.*"]
+    return "\n".join(lines)
+
+
 def build_comment(findings: list[dict], tool_name: str) -> str:
     if tool_name == "semgrep":
         return build_semgrep_comment(findings)
@@ -259,6 +331,8 @@ def build_comment(findings: list[dict], tool_name: str) -> str:
         return build_gitleaks_comment(findings)
     if tool_name == "trivy":
         return build_trivy_comment(findings)
+    if tool_name == "zap":
+        return build_zap_comment(findings)
     return f"{COMMENT_MARKER}\n## Security Findings\n\n{len(findings)} finding(s) found."
 
 
@@ -311,6 +385,7 @@ def main() -> None:
         "semgrep": lambda: parse_semgrep(SARIF_PATH),
         "gitleaks": lambda: parse_gitleaks(GITLEAKS_PATH),
         "trivy": lambda: parse_trivy(TRIVY_PATH),
+        "zap": lambda: parse_zap(ZAP_PATH),
     }
 
     if TOOL in parsers:
