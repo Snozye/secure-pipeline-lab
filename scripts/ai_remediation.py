@@ -38,7 +38,7 @@ PROVIDERS = [
     },
     {
         "name": "openrouter",
-        "model": "recursive/flint",
+        "model": "google/gemma-2-9b-it:free",
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "key_env": "OPENROUTER_KEY",
         "max_tokens": 4096,

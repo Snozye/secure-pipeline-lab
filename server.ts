@@ -222,8 +222,6 @@ function configureApp (app: ReturnType<typeof express>, seq: typeof sequelize) {
     csaf: config.get<string>('server.baseUrl') + config.get<string>('application.securityTxt.csaf'),
     expires: securityTxtExpiration.toUTCString()
   }))
-const secret = 'ThisIsMySuperSecretAndSuperLongPassword!@#@ˆ!@231570159124eraqerqw'
-const password = 'ThisIsMySuperSecretAndSuperLongPassword!@#@ˆ!@231570159124eraqerqwaaaaa'
 
   /* robots.txt */
   app.use(robots({ UserAgent: '*', Disallow: '/ftp' }))
