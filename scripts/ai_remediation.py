@@ -402,7 +402,8 @@ def main() -> None:
     print(f"{len(findings)} finding(s) [{TOOL}]")
     for f in findings:
         loc = f":{f['line']}" if f.get("line") else ""
-        print(f"  {f['severity']} {f['rule_id']} @ {f['filepath']}{loc}")
+        location = f.get("filepath") or f.get("rule_name", "")
+        print(f"  {f['severity']} {f['rule_id']} @ {location}{loc}")
 
     comment = build_comment(findings, tool_name)
 
