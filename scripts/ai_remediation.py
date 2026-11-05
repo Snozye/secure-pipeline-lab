@@ -33,7 +33,7 @@ PROVIDERS = [
         "model": "gemini-3.8-flash",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "key_env": "GEMINI_KEY",
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "auth_header": "Authorization",
     },
     {
@@ -41,7 +41,7 @@ PROVIDERS = [
         "model": "recursive/flint",
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "key_env": "OPENROUTER_KEY",
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "auth_header": "Authorization",
     },
 ]
@@ -163,73 +163,51 @@ def parse_trivy(path: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# AI analysis
+# AI analysis (batch — all findings in one API call)
 # ---------------------------------------------------------------------------
 
-def build_prompt(finding: dict) -> str:
-    tool = finding["tool"]
+def build_batch_prompt(findings: list[dict]) -> str:
+    sections = []
+    for i, f in enumerate(findings):
+        code_context = read_code_context(f["filepath"], f["line"])
+        match_info = f"\n  Matched: `{f['extra']}`" if f.get("extra") else ""
+        sections.append(
+            f"Finding {i + 1} [{f['tool']}]\n"
+            f"- Rule: `{f['rule_id']}`\n"
+            f"- Description: {f['rule_name']}\n"
+            f"- File: `{f['filepath']}:{f['line']}`\n"
+            f"- Severity: {f['severity']}{match_info}\n\n"
+            f"Code context (→ marks flagged line):\n```\n{code_context}\n```"
+        )
 
-    if tool == "semgrep":
-        code_context = read_code_context(finding["filepath"], finding["line"])
-        return f"""You are an AppSec engineer reviewing a Semgrep finding. Be concise and specific.
+    body = "\n\n---\n\n".join(sections)
+    return f"""You are an AppSec engineer reviewing security findings. Be concise and specific.
 
-Finding
-- Rule: `{finding["rule_id"]}`
-- Description: {finding["rule_name"]}
-- File: `{finding["filepath"]}:{finding["line"]}`
-- Severity: {finding["severity"]}
+{body}
 
-Code context (→ marks the flagged line):
-```
-{code_context}
-```
-
-Respond with ONLY valid JSON (no markdown fences, no extra text):
-{{
-  "is_tp": true or false,
-  "one_liner": "one sentence explaining why this specific code is exploitable, or why it is a false positive",
-  "fix": "REQUIRED if is_tp=true: a unified diff showing the minimal code change. Use - for removed lines and + for added lines. Example: - const x = eval(input)\\n+ const x = sanitize(input). Set to null only if is_tp=false.",
-  "fix_explanation": "REQUIRED if is_tp=true: one sentence on what the fix does. Set to null only if is_tp=false."
-}}"""
-
-    else:  # gitleaks or trivy
-        code_context = read_code_context(finding["filepath"], finding["line"])
-        match_info = f"\nMatched pattern: `{finding['extra']}`" if finding.get("extra") else ""
-        return f"""You are an AppSec engineer reviewing a secret detected in source code. Be concise and specific.
-
-Finding
-- Tool: {tool.capitalize()}
-- Rule: `{finding["rule_id"]}`
-- Description: {finding["rule_name"]}
-- File: `{finding["filepath"]}:{finding["line"]}`
-- Severity: {finding["severity"]}{match_info}
-
-Code context (→ marks the flagged line):
-```
-{code_context}
-```
-
-Respond with ONLY valid JSON (no markdown fences, no extra text):
-{{
-  "is_tp": true or false,
-  "one_liner": "one sentence explaining why this secret is dangerous, or why it is a false positive",
-  "fix": "REQUIRED if is_tp=true: a unified diff showing how to remove the hardcoded secret and load it from an environment variable instead. Use - for removed lines and + for added lines. Set to null only if is_tp=false.",
-  "fix_explanation": "REQUIRED if is_tp=true: one sentence on what the fix does. Set to null only if is_tp=false."
-}}"""
+Respond with ONLY a valid JSON array (no markdown fences, no extra text), one object per finding in the same order:
+[
+  {{
+    "is_tp": true or false,
+    "one_liner": "one sentence: why exploitable or why false positive",
+    "fix": "unified diff (- removed / + added lines) if is_tp=true, else null",
+    "fix_explanation": "one sentence on what the fix does if is_tp=true, else null"
+  }}
+]"""
 
 
-RETRY_DELAYS = {429: 60, 503: 30}  # seconds to wait before retrying same provider
+RETRY_DELAYS = {429: 60, 503: 30}
 MAX_RETRIES = 2
 
 
-def _call_provider(provider: dict, finding: dict) -> dict:
+def _call_provider(provider: dict, findings: list[dict]) -> list[dict]:
     key_env = provider["key_env"]
     api_key = os.environ.get(key_env, "")
     if not api_key:
         raise ValueError(f"No API key for provider {provider['name']} (env: {key_env})")
 
     auth_header = provider.get("auth_header", "Authorization")
-    auth_value = f"Bearer {api_key}" if auth_header == "Authorization" else api_key
+    auth_value = f"Bearer {api_key}"
 
     for attempt in range(1, MAX_RETRIES + 1):
         resp = requests.post(
@@ -238,13 +216,13 @@ def _call_provider(provider: dict, finding: dict) -> dict:
             json={
                 "model": provider["model"],
                 "max_tokens": provider["max_tokens"],
-                "messages": [{"role": "user", "content": build_prompt(finding)}],
+                "messages": [{"role": "user", "content": build_batch_prompt(findings)}],
             },
-            timeout=60,
+            timeout=120,
         )
         if resp.status_code in RETRY_DELAYS and attempt < MAX_RETRIES:
             delay = RETRY_DELAYS[resp.status_code]
-            print(f"    [{provider['name']}] HTTP {resp.status_code} — retrying in {delay}s (attempt {attempt}/{MAX_RETRIES})")
+            print(f"  [{provider['name']}] HTTP {resp.status_code} — retrying in {delay}s (attempt {attempt}/{MAX_RETRIES})")
             time.sleep(delay)
             continue
         resp.raise_for_status()
@@ -253,7 +231,7 @@ def _call_provider(provider: dict, finding: dict) -> dict:
     data = resp.json()
     content = data["choices"][0]["message"]["content"]
     if not content:
-        print(f"    [debug] full response from {provider['name']}: {data}")
+        print(f"  [debug] full response from {provider['name']}: {data}")
         raise ValueError(f"Provider {provider['name']} returned empty content")
 
     text = content.strip()
@@ -262,28 +240,33 @@ def _call_provider(provider: dict, finding: dict) -> dict:
     if text.endswith("```"):
         text = "\n".join(text.split("\n")[:-1])
 
-    return json.loads(text.strip())
+    result = json.loads(text.strip())
+    if not isinstance(result, list):
+        raise ValueError(f"Expected JSON array, got {type(result).__name__}")
+    if len(result) != len(findings):
+        raise ValueError(f"Expected {len(findings)} results, got {len(result)}")
+    return result
 
 
-def analyze_finding(finding: dict) -> tuple[dict, str]:
-    """Try each provider in order; return (result, provider_name) on first success."""
+def analyze_findings_batch(findings: list[dict]) -> tuple[list[dict], str]:
+    """Send all findings in one API call. Returns (analyses, provider_name)."""
     last_exc: Exception = RuntimeError("No providers configured")
     for provider in PROVIDERS:
         try:
-            result = _call_provider(provider, finding)
-            return result, provider["name"]
+            results = _call_provider(provider, findings)
+            return results, provider["name"]
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else None
             body = exc.response.text[:300] if exc.response is not None else ""
-            print(f"    [{provider['name']}] HTTP {status} — {body} — trying next provider")
+            print(f"  [{provider['name']}] HTTP {status} — {body} — trying next provider")
             last_exc = exc
             if status not in (400, 402, 429, 500, 502, 503):
-                break  # non-retriable status, skip remaining providers
+                break
         except (ValueError, json.JSONDecodeError) as exc:
-            print(f"    [{provider['name']}] {exc} — trying next provider")
+            print(f"  [{provider['name']}] {exc} — trying next provider")
             last_exc = exc
         except Exception as exc:
-            print(f"    [{provider['name']}] unexpected error: {exc} — trying next provider")
+            print(f"  [{provider['name']}] unexpected error: {exc} — trying next provider")
             last_exc = exc
     raise last_exc
 
@@ -430,23 +413,21 @@ def main() -> None:
         sys.exit(0)
 
     provider_names = [p["name"] for p in PROVIDERS if os.environ.get(p["key_env"])]
-    print(f"Analyzing {len(findings)} finding(s) [{TOOL}] — providers: {', '.join(provider_names) or 'none configured'}")
-
-    results = []
+    print(f"Analyzing {len(findings)} finding(s) [{TOOL}] in one batch — providers: {', '.join(provider_names) or 'none configured'}")
     for f in findings:
         print(f"  [{f['tool']}] {f['rule_id']} @ {f['filepath']}:{f['line']}")
-        try:
-            analysis, used_provider = analyze_finding(f)
-            print(f"    ✓ analyzed via {used_provider}")
-        except Exception as exc:
-            print(f"    ⚠ all providers failed: {exc}")
-            analysis = {
-                "is_tp": True,
-                "one_liner": "Analysis failed — review manually.",
-                "fix": None,
-                "fix_explanation": None,
-            }
-        results.append({"finding": f, "analysis": analysis})
+
+    try:
+        analyses, used_provider = analyze_findings_batch(findings)
+        print(f"✓ batch analyzed via {used_provider}")
+    except Exception as exc:
+        print(f"⚠ all providers failed: {exc}")
+        analyses = [
+            {"is_tp": True, "one_liner": "Analysis failed — review manually.", "fix": None, "fix_explanation": None}
+            for _ in findings
+        ]
+
+    results = [{"finding": f, "analysis": a} for f, a in zip(findings, analyses)]
 
     comment = build_comment(results, tool_name)
 
