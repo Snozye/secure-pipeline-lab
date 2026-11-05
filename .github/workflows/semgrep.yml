@@ -45,9 +45,6 @@ jobs:
       - name: Run AI remediation analysis
         if: always() && github.event_name == 'pull_request'
         env:
-          ABL_KEY: ${{ secrets.ABL_KEY }}
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
