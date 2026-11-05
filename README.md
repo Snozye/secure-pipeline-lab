@@ -2,6 +2,11 @@
 
 A DevSecOps pipeline built on top of [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) — an intentionally vulnerable Node.js application used as the scan target.
 
+> **Authorship note:** This repo vendors OWASP Juice Shop as the scan target. My work is in
+> `.github/workflows/`, `scripts/`, `findings/`, `WRITEUP.md`, and the tuning configs
+> (`.semgrepignore`, `.gitleaks.toml`, `zap.rules`). Everything else is upstream Juice Shop,
+> included so the pipeline has a real target to scan.
+
 The pipeline runs four security tools on every push. The interesting work is not running the tools — it's what comes after: classifying hundreds of findings, tuning each tool until the signal-to-noise ratio is usable, and documenting every decision.
 
 ---
@@ -94,3 +99,7 @@ The 5 TPs — missing CSP, overpermissive CORS, missing COEP, deprecated Feature
 
 OWASP Juice Shop is maintained at [juice-shop/juice-shop](https://github.com/juice-shop/juice-shop). License: [MIT](LICENSE)
 
+
+## Pipeline Status
+
+All scans run on every PR.

@@ -53,12 +53,9 @@ jobs:
         if: always() && github.event_name == 'pull_request'
         run: pip install requests
 
-      - name: Run AI remediation analysis
+      - name: Post findings comment
         if: always() && github.event_name == 'pull_request'
         env:
-          ABL_KEY: ${{ secrets.ABL_KEY }}
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}

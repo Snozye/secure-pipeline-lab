@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +31,25 @@ jobs:
           fail_action: true
           allow_issue_writing: false
           rules_file_name: 'zap.rules'
+
+      - name: Set up Python
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        if: always() && github.event_name == 'pull_request'
+        run: pip install requests
+
+      - name: Post findings comment
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          TOOL: zap
+        run: python scripts/ai_remediation.py
 
       - name: Upload ZAP report
         if: always()
